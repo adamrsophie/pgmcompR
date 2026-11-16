@@ -1,0 +1,55 @@
+Package: pgmcompR
+Title: Probabilistic Graphical Models in Native R
+Version: 0.1.0
+Authors@R:
+    person("Adam R", "Sophie", email = "adamrsophie@gmail.com",
+           role = c("aut", "cre", "cph"))
+Description: A unified framework for probabilistic graphical models written
+    in R. Provides first class discrete and Gaussian factors with an explicit
+    variable registry, Bayesian networks with tabular, linear Gaussian,
+    conditional Gaussian and custom conditional distributions, Markov networks,
+    factor graphs, junction trees and dynamic Bayesian networks. Inference
+    includes enumeration, variable elimination with several elimination
+    orderings, junction tree calibration, sum product and max product belief
+    propagation, loopy belief propagation with damping, maximum a posteriori and
+    most probable explanation queries, rejection sampling, likelihood weighting,
+    importance sampling, Gibbs sampling with convergence diagnostics, forward
+    backward smoothing, Viterbi decoding, particle filtering and Kalman
+    filtering. Parameters are estimated by maximum likelihood, Dirichlet
+    posterior estimation or expectation maximization; structures are learned by
+    the PC algorithm, hill climbing, tabu search and max min hill climbing.
+    Causal tools cover d-separation, backdoor and frontdoor adjustment,
+    interventional queries by truncated factorization and counterfactuals in
+    discrete structural causal models. Models can be read and written as BIF,
+    XMLBIF, UAI and JSON, and converted to and from 'bnlearn', 'gRain' and
+    'igraph'. Every algorithm has a pure R implementation; optional compiled
+    kernels accelerate factor algebra.
+License: GPL-3
+Encoding: UTF-8
+Language: en-US
+Roxygen: list(markdown = TRUE)
+Depends: R (>= 4.1.0)
+Imports:
+    graphics,
+    grDevices,
+    Rcpp,
+    stats,
+    utils
+LinkingTo:
+    Rcpp
+Suggests:
+    bench,
+    bnlearn,
+    gRain,
+    gRbase,
+    igraph,
+    jsonlite,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0),
+    xml2
+VignetteBuilder: knitr
+Config/testthat/edition: 3
+URL: https://github.com/adamrsophie/pgmcompR
+BugReports: https://github.com/adamrsophie/pgmcompR/issues
+Config/roxygen2/version: 8.1.1

@@ -1,0 +1,129 @@
+---
+title: "Markov networks and factor graphs"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Markov networks and factor graphs}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4.5)
+```
+
+```{r}
+library(pgmcompR)
+```
+
+Undirected models describe symmetric interactions. A Markov network (Markov
+random field) defines
+$$P(x) = \frac{1}{Z} \prod_{c} \phi_c(x_c), \qquad Z = \sum_x \prod_c \phi_c(x_c),$$
+with nonnegative potentials $\phi_c$ that need not be probabilities.
+
+## A small Ising model
+
+Three binary spins on a triangle, each pair preferring agreement:
+
+```{r}
+st <- list(A = c("-", "+"), B = c("-", "+"), C = c("-", "+"))
+agree <- function(a, b, w = 2) discrete_factor(c(a, b), st[c(a, b)], c(exp(w), 1, 1, exp(w)))
+field <- discrete_factor("A", st["A"], c(1, 3))
+mn <- markov_network(list(agree("A", "B"), agree("B", "C"), agree("C", "A"), field))
+mn
+partition_function(mn)
+query(mn, "C")
+query(mn, "C", evidence = list(B = "-"))
+```
+
+The external field on `A` pulls the other spins toward `+` through the
+couplings. Exact queries use the same variable elimination and junction tree
+engines as Bayesian networks.
+
+```{r}
+query(mn, c("A", "C"), method = "jt")
+```
+
+## Separation
+
+In an undirected graph, $X$ and $Y$ are independent given $Z$ whenever every
+path from $X$ to $Y$ passes through $Z$:
+
+```{r}
+chain <- markov_network(list(agree("A", "B"), agree("B", "C")))
+separated(chain$graph, "A", "C", "B")
+f_ac <- query(chain, c("A", "C"), list(B = "+"))
+f_a <- query(chain, "A", list(B = "+"))
+f_c <- query(chain, "C", list(B = "+"))
+all.equal(factor_values(f_ac), as.numeric(outer(factor_values(f_a), factor_values(f_c))))
+```
+
+## Factor graphs
+
+A factor graph is a bipartite graph between variables and factors. It makes
+the factorization explicit: two models with the same Markov network can have
+different factor graphs (one triangle potential versus three pairwise ones).
+
+```{r}
+fg <- factor_graph(list(agree("A", "B"), agree("B", "C"), agree("C", "A")))
+fg
+```
+
+```{r, eval = requireNamespace("igraph", quietly = TRUE)}
+plot(fg)
+```
+
+## Converting between model families
+
+A Bayesian network converts to a factor graph (one factor per CPD) or a
+Markov network (its moral graph); the distribution is unchanged and
+$Z = 1$.
+
+```{r}
+asia <- example_network("asia")
+asia_fg <- as_factor_graph(asia)
+partition_function(asia_fg)
+all.equal(query(asia_fg, "lung", list(xray = "yes")), query(asia, "lung", list(xray = "yes")))
+nrow(edges(as_markov_network(asia)$graph))
+```
+
+Independencies that need the directions, such as `asia` and `smoke` being
+marginally independent, are lost in the moral graph:
+
+```{r}
+d_separated(asia, "asia", "smoke")
+separated(moralize(asia), "asia", "smoke")
+```
+
+## Belief propagation
+
+Sum product belief propagation computes all single variable marginals at
+once. It is exact on tree shaped factor graphs:
+
+```{r}
+bp <- belief_propagation(chain)
+bp
+```
+
+On the triangle it is loopy and approximate:
+
+```{r}
+lbp <- loopy_bp(mn)
+lbp$beliefs$C
+query(mn, "C")
+```
+
+Max product propagation gives max marginals and the most probable joint
+state on trees:
+
+```{r}
+belief_propagation(chain, type = "max")$assignment
+mpe_query(chain)$assignment
+```
+
+## Sampling
+
+Gibbs sampling works on any discrete model with a positive distribution:
+
+```{r}
+query(mn, "C", method = "gibbs", n = 4000, seed = 1)
+```

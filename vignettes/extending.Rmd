@@ -1,0 +1,104 @@
+---
+title: "Extending pgmcompR"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Extending pgmcompR}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4.5)
+```
+
+```{r}
+library(pgmcompR)
+```
+
+pgmcompR is built to be extended without changing its source. Inference
+methods, scores, estimators and samplers live in registries, and CPDs are
+S3 objects with a small contract.
+
+## A custom inference method
+
+An inference method is a function of the model, the query variables and the
+evidence (plus `...`) that returns a normalized factor. Once registered, it
+is available through `query()`:
+
+```{r}
+exact_by_enumeration_twice <- function(model, variables, evidence, ...) {
+  a <- query(model, variables, evidence, method = "enumeration")
+  b <- query(model, variables, evidence, method = "ve")
+  stopifnot(isTRUE(all.equal(factor_values(a), factor_values(b))))
+  a
+}
+register_inference_method("checked_exact", exact_by_enumeration_twice)
+query(example_network("asia"), "lung", list(xray = "yes"), method = "checked_exact")
+list_extensions()$inference
+unregister_extension("inference", "checked_exact")
+```
+
+Built in methods cannot be unregistered or overwritten by accident.
+
+## A custom score
+
+A score is a decomposable local function of a node, its candidate parents
+and the data. Here is BIC with a heavier penalty:
+
+```{r}
+strict_bic <- function(node, parents, data, ...) {
+  r <- nlevels(data[[node]])
+  counts <- matrix(as.vector(table(data[c(node, parents)])), nrow = r)
+  props <- sweep(counts, 2, pmax(colSums(counts), 1), "/")
+  loglik <- sum(counts[counts > 0] * log(props[counts > 0]))
+  loglik - log(nrow(data)) * (r - 1) * ncol(counts)
+}
+register_score("strict_bic", strict_bic)
+d <- simulate_bn(example_network("sprinkler"), 3000, seed = 1)
+hill_climb(d, score = "strict_bic")
+unregister_extension("score", "strict_bic")
+```
+
+## A custom CPD class
+
+A CPD needs, at minimum, a `child` and `parents` and a `cpd_to_factor()`
+method that returns a tabular CPD. Methods for `sample_cpd()` and
+`cpd_log_density()` are optional: by default the tabular form is used.
+Here is a logistic CPD with a binary parent:
+
+```{r}
+logistic_cpd <- function(child, parent, intercept, slope) {
+  structure(list(child = child, parents = parent, intercept = intercept, slope = slope),
+            class = "logistic_cpd")
+}
+cpd_to_factor.logistic_cpd <- function(x, model, ...) {
+  p1 <- plogis(x$intercept + x$slope * c(0, 1))
+  st <- list(c("0", "1"), c("0", "1"))
+  names(st) <- c(x$child, x$parents)
+  cpd(x$child, rbind(1 - p1, p1), parents = x$parents, states = st)
+}
+registerS3method("cpd_to_factor", "logistic_cpd", cpd_to_factor.logistic_cpd,
+                 envir = asNamespace("pgmcompR"))
+
+bn <- bayesian_network(list(c("Exposure", "Disease")),
+                       states = list(Exposure = c("0", "1"), Disease = c("0", "1")))
+bn <- add_cpd(bn, cpd("Exposure", c(`0` = 0.8, `1` = 0.2)))
+bn <- add_cpd(bn, logistic_cpd("Disease", "Exposure", intercept = -3, slope = 1.5))
+query(bn, "Exposure", list(Disease = "1"))
+head(simulate_bn(bn, 5, seed = 1))
+```
+
+In a package, write `S3method(cpd_to_factor, logistic_cpd)` in the
+NAMESPACE instead of calling `registerS3method()`. See `?cpd_contract` for
+the full contract, including `validate_cpd()`.
+
+## Choosing the computational backend
+
+Factor products and marginalizations have an R implementation and a C++
+implementation. They give the same results to within 1e-12; the C++ kernels
+are faster for large factors.
+
+```{r}
+pgm_backend()
+with_backend("cpp", query(example_network("asia"), "lung", list(xray = "yes")))
+```

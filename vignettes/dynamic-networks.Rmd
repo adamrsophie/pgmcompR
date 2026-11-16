@@ -1,0 +1,114 @@
+---
+title: "Dynamic Bayesian networks and hidden Markov models"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Dynamic Bayesian networks and hidden Markov models}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4.5)
+```
+
+```{r}
+library(pgmcompR)
+```
+
+A dynamic Bayesian network (DBN) describes a process over discrete time by a
+two slice template: an initial model for $t = 1$ and a transition model for
+$X_t$ given $X_{t-1}$, repeated as often as needed.
+
+## A hidden Markov model
+
+The umbrella world of Russell and Norvig: rain is hidden, umbrellas are
+observed.
+
+```{r}
+h <- hmm(hidden_states = c("rain", "dry"),
+         observation_states = c("umbrella", "none"),
+         initial = c(0.5, 0.5),
+         transition = matrix(c(0.7, 0.3, 0.3, 0.7), 2),
+         emission = matrix(c(0.9, 0.1, 0.2, 0.8), 2))
+h
+obs <- data.frame(Observation = c("umbrella", "umbrella", "none", "umbrella", "umbrella"))
+```
+
+Each column of `transition` is $P(X_t \mid X_{t-1})$ for one previous state.
+
+### Filtering, smoothing, decoding and forecasting
+
+```{r}
+filt <- filter_dbn(h, obs)
+sapply(filt$marginals, function(m) factor_values(m$Hidden)[1])
+filt$loglik
+smth <- smooth_dbn(h, obs)
+sapply(smth$marginals, function(m) factor_values(m$Hidden)[1])
+viterbi_dbn(h, obs)
+forecast_dbn(h, obs, horizon = 3)[[3]]$Hidden
+```
+
+Filtering uses the evidence up to time $t$; smoothing uses all of it, so the
+third day (no umbrella) is less certainly dry after smoothing. Missing
+observations (`NA`) are skipped.
+
+## A general DBN
+
+Variables within a slice can depend on each other, and arcs between slices
+can connect different variables.
+
+```{r}
+st <- list(Health = c("good", "poor"), Exercise = c("no", "yes"), Fatigue = c("no", "yes"))
+dbn <- dynamic_bn(st, intra = list(c("Health", "Fatigue"), c("Exercise", "Fatigue")),
+                  inter = list(c("Health", "Health"), c("Exercise", "Health"), c("Exercise", "Exercise")))
+dbn_parents(dbn, "Health", "transition")
+dbn <- add_dbn_cpd(dbn, "Health", c(good = 0.8, poor = 0.2), "initial")
+dbn <- add_dbn_cpd(dbn, "Exercise", c(no = 0.6, yes = 0.4), "initial")
+fat <- c(0.9, 0.1, 0.7, 0.3, 0.4, 0.6, 0.5, 0.5)
+dbn <- add_dbn_cpd(dbn, "Fatigue", fat, "initial")
+dbn <- add_dbn_cpd(dbn, "Fatigue", fat, "transition")
+dbn <- add_dbn_cpd(dbn, "Exercise", c(0.8, 0.2, 0.3, 0.7), "transition")
+dbn <- add_dbn_cpd(dbn, "Health", c(0.9, 0.1, 0.3, 0.7, 0.97, 0.03, 0.6, 0.4), "transition")
+check_model(dbn)
+ev <- data.frame(Fatigue = c("yes", "yes", "no", "no"), Exercise = c(NA, "yes", "yes", NA))
+smooth_dbn(dbn, ev)$marginals[[2]]$Health
+```
+
+### Simulation and learning
+
+```{r}
+sim <- simulate_dbn(dbn, 2000, seed = 1)
+head(sim)
+learned <- fit_dbn(dbn, sim)
+learned$transition$Exercise
+```
+
+### Particle filtering
+
+When the joint state of a slice is too large for exact filtering, a
+bootstrap particle filter gives approximate filtered marginals:
+
+```{r}
+pf <- particle_filter(dbn, ev, n_particles = 5000, seed = 1)
+pf$marginals[[4]]$Health
+filter_dbn(dbn, ev)$marginals[[4]]$Health
+```
+
+## Linear Gaussian state space models
+
+For continuous states with linear dynamics and Gaussian noise, the Kalman
+filter and the Rauch Tung Striebel smoother are exact.
+
+```{r}
+set.seed(2)
+x <- cumsum(rnorm(30, 0, 0.5))
+y <- x + rnorm(30, 0, 1)
+y[c(10, 11, 20)] <- NA
+kf <- kalman_filter(y, A = 1, C = 1, Q = 0.25, R = 1, m0 = 0, P0 = 10)
+ks <- kalman_smoother(kf)
+plot(y, pch = 16, col = "grey50", ylab = "level", xlab = "time")
+lines(x, lwd = 2)
+lines(kf$m[, 1], col = "#F2A93B", lwd = 2)
+lines(ks$m_smooth[, 1], col = "#3B5BDB", lwd = 2)
+legend("topleft", c("truth", "filtered", "smoothed"), col = c("black", "#F2A93B", "#3B5BDB"), lwd = 2, bty = "n")
+```

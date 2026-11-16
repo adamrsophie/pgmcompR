@@ -1,0 +1,136 @@
+---
+title: "Introduction to Bayesian networks"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Introduction to Bayesian networks}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4.5)
+```
+
+A Bayesian network represents a joint distribution over variables
+$X_1, \dots, X_n$ by a directed acyclic graph (DAG) and one conditional
+distribution per node:
+$$P(X_1, \dots, X_n) = \prod_{i=1}^n P(X_i \mid \mathrm{Pa}(X_i)).$$
+The graph encodes conditional independencies (read off by d-separation) and,
+under causal assumptions, the effects of interventions.
+
+```{r}
+library(pgmcompR)
+```
+
+## Building a network by hand
+
+We model a simplified diagnostic problem. Smoking raises the risk of lung
+cancer; cancer makes an abnormal chest X-ray and shortness of breath more
+likely.
+
+```{r}
+bn <- bayesian_network(list(
+  c("Smoking", "Cancer"),
+  c("Cancer", "XRay"),
+  c("Cancer", "Dyspnea")
+))
+bn
+```
+
+Conditional distributions are added node by node. A root node takes a named
+probability vector. A node with parents takes a matrix whose rows are the
+child's states and whose columns are parent configurations; the parents'
+state labels come from the variable registry.
+
+```{r}
+bn <- add_cpd(bn, "Smoking", c(no = 0.7, yes = 0.3))
+bn <- add_cpd(bn, "Cancer", matrix(c(0.995, 0.005,
+                                     0.95,  0.05), nrow = 2,
+                                   dimnames = list(c("no", "yes"), NULL)))
+bn <- add_cpd(bn, "XRay", matrix(c(0.9, 0.1,
+                                   0.2, 0.8), nrow = 2,
+                                 dimnames = list(c("negative", "positive"), NULL)))
+bn <- add_cpd(bn, "Dyspnea", matrix(c(0.85, 0.15,
+                                      0.35, 0.65), nrow = 2,
+                                    dimnames = list(c("no", "yes"), NULL)))
+check_model(bn)
+get_cpd(bn, "Cancer")
+variable_registry(bn)
+```
+
+`check_model()` verifies that every node has a CPD, that parents match the
+graph, that every column sums to one and that state labels agree across
+CPDs. Mistakes are reported rather than repaired:
+
+```{r, error = TRUE}
+cpd("Smoking", c(no = 0.7, yes = 0.4))
+```
+
+## Queries
+
+`query()` returns the posterior of the query variables as a normalized
+factor. The default method is exact variable elimination.
+
+```{r}
+query(bn, "Cancer", evidence = list(XRay = "positive"))
+query(bn, "Cancer", evidence = list(XRay = "positive", Dyspnea = "yes", Smoking = "yes"))
+```
+
+A joint query returns a factor over several variables; `joint = FALSE`
+returns marginals instead.
+
+```{r}
+query(bn, c("Cancer", "Smoking"), evidence = list(XRay = "positive"))
+```
+
+The most probable explanation and maximum a posteriori assignments are
+different queries from marginal posteriors:
+
+```{r}
+mpe_query(bn, evidence = list(XRay = "positive"))
+map_query(bn, "Cancer", evidence = list(XRay = "positive"))
+```
+
+Here the posterior probability of cancer given a positive X-ray is still
+small, so the MAP state of `Cancer` is `"no"`, even though the evidence
+raised its probability more than tenfold.
+
+## Independence and the Markov blanket
+
+```{r}
+d_separated(bn, "XRay", "Dyspnea", "Cancer")
+d_separated(bn, "XRay", "Dyspnea")
+markov_blanket(bn, "Cancer")
+```
+
+## Observation versus intervention
+
+Observing a positive X-ray changes our belief about smoking; forcing the
+X-ray machine to print "positive" does not:
+
+```{r}
+query(bn, "Smoking", evidence = list(XRay = "positive"))
+do_query(bn, "Smoking", interventions = list(XRay = "positive"))
+```
+
+## Simulation
+
+```{r}
+set.seed(1)
+d <- simulate_bn(bn, 5)
+d
+```
+
+## Plotting
+
+```{r, eval = requireNamespace("igraph", quietly = TRUE)}
+plot(bn, evidence = "XRay")
+```
+
+## Example networks
+
+The package ships classic networks for experimentation:
+`example_network("asia")`, `"sprinkler"`, `"cancer"`, `"student"` and
+`"gaussian"`. The remaining vignettes use them to cover learning, exact and
+approximate inference, Markov networks, Gaussian and dynamic models, causal
+queries, interoperability, extension and performance.

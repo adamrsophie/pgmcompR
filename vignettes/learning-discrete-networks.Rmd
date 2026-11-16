@@ -1,0 +1,163 @@
+---
+title: "Learning discrete networks from data"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Learning discrete networks from data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4.5)
+```
+
+```{r}
+library(pgmcompR)
+```
+
+We pretend not to know the chest clinic ("Asia") network of Lauritzen and
+Spiegelhalter (1988) and learn it from simulated patient records.
+
+```{r}
+truth <- example_network("asia")
+records <- simulate_bn(truth, 5000, seed = 2024)
+head(records)
+```
+
+## Parameters for a known structure
+
+With the structure fixed, `fit_parameters()` estimates the CPDs. Maximum
+likelihood uses relative frequencies; Bayesian estimation uses the posterior
+mean under a Dirichlet prior, which is also the posterior predictive
+probability of the next patient.
+
+```{r}
+skeleton_bn <- bayesian_network(edges(truth))
+mle <- fit_parameters(skeleton_bn, records, method = "mle")
+bayes <- fit_parameters(skeleton_bn, records, method = "bayes",
+                        prior = "bdeu", equivalent_sample_size = 10)
+get_cpd(mle, "tub")
+get_cpd(bayes, "tub")
+```
+
+`tub` given `asia = "yes"` rests on few records (about 1% of patients visited
+Asia), and the prior visibly shrinks it. Rare parent configurations are where
+the choice of estimator matters.
+
+### Unobserved parent configurations
+
+If a parent configuration never occurs, maximum likelihood is undefined.
+pgmcompR never fills such columns silently: the `unobserved` argument decides.
+
+```{r, error = TRUE}
+few <- records[1:30, ]
+fit_parameters(skeleton_bn, few, unobserved = "error")
+```
+
+```{r}
+fit_uniform <- fit_parameters(skeleton_bn, few, unobserved = "uniform")
+```
+
+### Structural zeros
+
+Some cells are impossible by definition: `either` is the logical OR of
+`tub` and `lung`. Structural zeros keep them at zero even under a prior.
+
+```{r}
+zeros <- matrix(c(FALSE, TRUE,  TRUE, FALSE,  TRUE, FALSE,  TRUE, FALSE), 2)
+fz <- fit_parameters(skeleton_bn, records, method = "bayes",
+                     structural_zeros = list(either = zeros))
+get_cpd(fz, "either")
+```
+
+### Missing values and EM
+
+Real records are incomplete. Suppose smoking status is missing for a fifth
+of patients:
+
+```{r}
+set.seed(3)
+incomplete <- records
+incomplete$smoke[sample(nrow(incomplete), 1000)] <- NA
+em <- fit_parameters(skeleton_bn, incomplete, method = "em", max_iter = 50, seed = 1)
+attr(em, "iterations")
+round(diff(attr(em, "loglik")), 4)[1:5]
+get_cpd(em, "smoke")
+```
+
+The log likelihood increases monotonically, as EM guarantees. The expected
+counts in each E step are computed exactly with a junction tree per
+distinct missingness pattern.
+
+## Learning the structure
+
+### Conditional independence tests
+
+```{r}
+ci_test(records, "smoke", "dysp")
+ci_test(records, "lung", "bronc", "smoke")
+```
+
+### Constraint based: PC
+
+```{r}
+pc_graph <- pc_algorithm(records, alpha = 0.01)
+pc_graph
+```
+
+The PC algorithm returns a partially directed graph. Undirected edges are
+not oriented by the data: every DAG in the Markov equivalence class
+explains the observations equally well. The deterministic node `either`
+violates the faithfulness assumption that PC relies on, which explains the
+missing `either -- xray` edge.
+
+### Score based: hill climbing, tabu search and MMHC
+
+```{r}
+hc <- hill_climb(records, score = "bic")
+tabu <- tabu_search(records, score = "bic")
+mm <- mmhc(records, score = "bic")
+compare_graphs(truth, hc)
+compare_graphs(truth, tabu)
+compare_graphs(truth, mm)
+c(hc = attr(hc, "score"), tabu = attr(tabu, "score"), truth = network_score(truth, records, "bic"))
+```
+
+Arc reversals inside an equivalence class do not change BIC or BDeu, so
+"misoriented" arcs are expected; compare equivalence classes instead:
+
+```{r}
+markov_equivalent(tabu, truth)
+```
+
+### Prior knowledge
+
+Blacklists forbid arcs, whitelists require them, and tiers forbid arcs from
+later to earlier groups. A visit to Asia and smoking precede the diseases,
+which precede the symptoms and the X-ray:
+
+```{r}
+tiers <- list(c("asia", "smoke"), c("tub", "lung", "bronc", "either"), c("xray", "dysp"))
+hc_tiers <- hill_climb(records, tiers = tiers)
+compare_graphs(truth, hc_tiers)
+```
+
+### Edge stability
+
+The bootstrap shows which edges the data support firmly:
+
+```{r}
+strength <- bootstrap_structure(records[1:1500, ], R = 20, algorithm = "hill_climb", seed = 1)
+head(strength[order(-strength$strength), ], 10)
+averaged_network(strength, threshold = 0.7)
+```
+
+```{r, eval = requireNamespace("igraph", quietly = TRUE)}
+plot(averaged_network(strength, 0.5), edge_strength = strength)
+```
+
+## A caution
+
+Observational structure learning recovers at best a Markov equivalence
+class, under assumptions (faithfulness, no hidden confounders, correct
+tests). A learned arrow is not, by itself, evidence of a causal effect.

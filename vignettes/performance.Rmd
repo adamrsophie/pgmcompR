@@ -1,0 +1,83 @@
+---
+title: "Performance and backends"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Performance and backends}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r}
+library(pgmcompR)
+```
+
+pgmcompR is written for correctness and transparency first. This vignette
+reports where its time goes, how the two computational backends compare and
+how it compares with bnlearn and gRain. The timings were produced by
+`inst/benchmarks/run-benchmarks.R` and are loaded from a saved file, so
+building the vignette does not rerun them. Rerun the script on your own
+machine before drawing conclusions.
+
+## The two backends
+
+Factor products and marginalizations are implemented twice: in R (index
+arithmetic plus `aperm()` and `rowSums()`) and in C++ through Rcpp. The
+backend is a session option:
+
+```{r}
+pgm_backend()
+asia <- example_network("asia")
+r <- with_backend("R", query(asia, "lung", list(xray = "yes")))
+cc <- with_backend("cpp", query(asia, "lung", list(xray = "yes")))
+all.equal(factor_values(r), factor_values(cc), tolerance = 1e-12)
+```
+
+The test suite checks that both backends agree to a relative tolerance of
+1e-12 on random factors and networks.
+
+## Results
+
+```{r}
+res <- readRDS(system.file("benchmarks", "results.rds", package = "pgmcompR"))
+attr(res, "session")
+res$median_ms <- signif(res$median_ms, 3)
+knitr::kable(res, row.names = FALSE, col.names = c("Task", "Size", "Engine", "Median (ms)"))
+```
+
+## Reading the numbers
+
+* **Kernels.** At these factor sizes the C++ kernels are not faster than
+  the R ones. Base R's `aperm()` and `rowSums()` are already compiled code,
+  and the C++ path builds a full index vector. The C++ backend exists so
+  that the kernels can be improved without touching the algorithms; in
+  version 0.1.0 it is a correctness checked alternative, not a speedup.
+* **Queries.** For networks of this size the time of a query is dominated
+  by per factor bookkeeping in R (validation, scope handling, the greedy
+  elimination order), not by arithmetic. gRain, which compiles the
+  junction tree once and propagates in optimized code, is one to two
+  orders of magnitude faster for repeated queries. When the same evidence
+  is reused, calibrate a junction tree once with `calibrate()` and read
+  several marginals from it.
+* **Structure learning.** bnlearn's hill climbing, written in C with
+  score caching, is about ten times faster than the native implementation.
+  `learn_structure(engine = "bnlearn")` calls it directly.
+
+## Choosing a method
+
+| Situation | Suggested method |
+|---|---|
+| A few queries on a small or medium network | `method = "ve"` (default) |
+| Many queries with the same evidence | `calibrate(junction_tree(model), evidence)` |
+| Large treewidth, approximate answer acceptable | `"likelihood_weighting"`, `"gibbs"`, `"loopy_bp"` |
+| Tree shaped factor graph, all marginals | `belief_propagation()` |
+| Cross check against an independent implementation | `as_grain()` or `as_bnlearn()` |
+
+## Planned work
+
+Caching of elimination orders and factor scopes, sparse factors for
+deterministic CPDs, and a C++ implementation of junction tree propagation
+are planned for later versions.

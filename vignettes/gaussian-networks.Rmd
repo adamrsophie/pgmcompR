@@ -1,0 +1,112 @@
+---
+title: "Gaussian and hybrid networks"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Gaussian and hybrid networks}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4.5)
+```
+
+```{r}
+library(pgmcompR)
+```
+
+## Linear Gaussian Bayesian networks
+
+In a linear Gaussian network each variable is a linear function of its
+parents plus independent normal noise:
+$$X_i = \beta_{i0} + \sum_{j \in \mathrm{Pa}(i)} \beta_{ij} X_j + \varepsilon_i, \qquad \varepsilon_i \sim N(0, \sigma_i^2).$$
+The joint distribution is multivariate normal, and every conditional is
+available in closed form.
+
+```{r}
+g <- bayesian_network(list(c("Rainfall", "Yield"), c("Fertilizer", "Yield"), c("Yield", "Price")))
+g <- add_cpd(g, lg_cpd("Rainfall", intercept = 600, sd = 100))
+g <- add_cpd(g, lg_cpd("Fertilizer", intercept = 50, sd = 10))
+g <- add_cpd(g, lg_cpd("Yield", intercept = 1, coefficients = c(Rainfall = 0.004, Fertilizer = 0.03), sd = 0.5))
+g <- add_cpd(g, lg_cpd("Price", intercept = 300, coefficients = c(Yield = -20), sd = 15))
+check_model(g)
+joint <- gaussian_joint(g)
+gaussian_moments(joint)
+```
+
+Queries condition the joint Gaussian. A low price is evidence of a large
+harvest, and therefore of more rain:
+
+```{r}
+q <- query(g, "Rainfall", list(Price = 150))
+gaussian_moments(q)
+```
+
+Interventions cut incoming arcs. Setting the price by decree tells us
+nothing about rain:
+
+```{r}
+gaussian_moments(gaussian_query(g, "Rainfall", interventions = list(Price = 150)))
+gaussian_moments(gaussian_query(g, "Price", interventions = list(Fertilizer = 70)))
+```
+
+## Gaussian factors
+
+Internally, computations use canonical form $\exp(-\tfrac12 x^\top K x + h^\top x + g)$,
+in which products are sums and conditioning is a slice:
+
+```{r}
+f <- gaussian_factor(c("X", "Y"), mean = c(0, 1), covariance = matrix(c(1, 0.8, 0.8, 2), 2))
+gaussian_moments(gaussian_reduce(f, c(Y = 3)))
+gaussian_moments(gaussian_marginalize(f, "Y"))
+```
+
+## Learning
+
+Maximum likelihood for a linear Gaussian CPD is least squares regression on
+the parents:
+
+```{r}
+d <- simulate_bn(g, 2000, seed = 1)
+fit <- fit_parameters(bayesian_network(edges(g)), d)
+get_cpd(fit, "Yield")
+```
+
+## Conditional Gaussian (hybrid) networks
+
+A conditional Gaussian network allows discrete parents of continuous
+variables (never continuous parents of discrete ones). Each configuration of
+the discrete parents selects its own regression.
+
+```{r}
+hb <- bayesian_network(list(c("Species", "Length"), c("Species", "Weight"), c("Length", "Weight")))
+hb <- add_cpd(hb, cpd("Species", c(trout = 0.7, salmon = 0.3)))
+hb <- add_cpd(hb, cg_cpd("Length", "Species", list(Species = c("trout", "salmon")),
+                         intercept = c(40, 65), sd = c(5, 8)))
+hb <- add_cpd(hb, cg_cpd("Weight", "Species", list(Species = c("trout", "salmon")),
+                         intercept = c(-1, -2),
+                         coefficients = matrix(c(0.05, 0.08), 2, dimnames = list(NULL, "Length")),
+                         sd = c(0.3, 0.5), continuous_parents = "Length"))
+is_hybrid_bn(hb)
+post <- query(hb, c("Species", "Length"), list(Weight = 2))
+post
+```
+
+The posterior of the continuous variables is a mixture of normals, one
+component per discrete configuration; inference enumerates the discrete
+configurations exactly, so it is limited to models with a moderate number
+of them (`max_configurations`).
+
+## Gaussian Markov networks and Gaussian belief propagation
+
+An undirected Gaussian model is specified by its precision matrix. Gaussian
+belief propagation computes the exact means on any graph where it
+converges, and the exact variances on trees.
+
+```{r}
+K <- matrix(c(4, -1, 0, -1, 4, -1, 0, -1, 4), 3, dimnames = rep(list(c("A", "B", "C")), 2))
+gm <- gaussian_markov_network(K, h = c(1, 0, 2))
+gbp <- gaussian_bp(gm)
+gbp$mean
+solve(K, c(1, 0, 2))
+```

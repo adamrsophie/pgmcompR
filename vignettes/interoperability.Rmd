@@ -1,0 +1,111 @@
+---
+title: "Working with bnlearn, gRain and igraph"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Working with bnlearn, gRain and igraph}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4.5)
+```
+
+```{r}
+library(pgmcompR)
+```
+
+pgmcompR stands on its own, but it converts models to and from the
+established R packages, so results can be cross checked and existing code
+reused. All these packages are suggested, not required.
+
+```{r, include = FALSE}
+have_bnlearn <- requireNamespace("bnlearn", quietly = TRUE)
+have_grain <- requireNamespace("gRain", quietly = TRUE)
+have_igraph <- requireNamespace("igraph", quietly = TRUE)
+```
+
+## bnlearn
+
+```{r, eval = have_bnlearn}
+asia <- example_network("asia")
+fit <- as_bnlearn(asia)
+class(fit)
+fit$lung
+back <- from_bnlearn(fit)
+all.equal(query(back, "lung", list(xray = "yes")), query(asia, "lung", list(xray = "yes")))
+```
+
+Structures also convert, and `learn_structure()` can run bnlearn's
+implementations with `engine = "bnlearn"`:
+
+```{r, eval = have_bnlearn}
+d <- simulate_bn(example_network("sprinkler"), 2000, seed = 1)
+native <- learn_structure(d, "hill_climb")
+external <- learn_structure(d, "hill_climb", engine = "bnlearn")
+c(native = network_score(native, d, "bic"), bnlearn = network_score(external, d, "bic"))
+```
+
+Gaussian networks convert too:
+
+```{r, eval = have_bnlearn}
+g <- from_bnlearn(as_bnlearn(example_network("gaussian")))
+gaussian_moments(gaussian_joint(g))$mean
+```
+
+## gRain
+
+gRain implements junction tree inference. Its answers match pgmcompR's to
+rounding error:
+
+```{r, eval = have_grain}
+gr <- as_grain(asia)
+ev <- list(xray = "yes", smoke = "yes")
+gRain::querygrain(gRain::setEvidence(gr, evidence = ev), "lung")$lung
+query(asia, "lung", ev)
+```
+
+Note that gRbase, which gRain attaches, defines functions with the same
+names as some of ours (`parents()`, `nodes()`, `dag()` and others); call
+`pgmcompR::parents()` explicitly when both are attached.
+
+```{r, include = FALSE}
+if ("package:gRbase" %in% search()) detach("package:gRbase", character.only = TRUE)
+```
+
+## igraph
+
+```{r, eval = have_igraph}
+ig <- as_igraph(asia)
+igraph::is_dag(ig)
+igraph::degree(ig, mode = "in")
+is_isomorphic(as_pgm(ig), asia)
+```
+
+## File formats
+
+Models can be exchanged with other software through files:
+
+| Format | Writer | Reader | Notes |
+|---|---|---|---|
+| BIF | `write_bif()` | `read_bif()` | Discrete BNs; used by bnlearn, pgmpy, Weka |
+| XMLBIF | `write_xmlbif()` | `read_xmlbif()` | Needs the xml2 package |
+| UAI | `write_uai()` | `read_uai()` | BAYES and MARKOV networks; inference competitions |
+| JSON | `write_json_model()` | `read_json_model()` | All pgmcompR model types; full precision |
+| RDS | `save_model()` | `load_model()` | Native R serialization |
+
+```{r}
+f <- tempfile(fileext = ".bif")
+write_bif(asia, f)
+cat(readLines(f)[1:12], sep = "\n")
+identical(model_states(read_bif(f)), model_states(asia))
+```
+
+```{r, eval = have_bnlearn}
+all.equal(query(from_bnlearn(bnlearn::read.bif(f)), "lung", list(xray = "yes")),
+          query(asia, "lung", list(xray = "yes")))
+```
+
+Features a format cannot represent (continuous CPDs in BIF, state names
+with spaces) raise an error of class `pgm_unsupported_feature` rather than
+being dropped silently.

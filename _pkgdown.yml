@@ -1,0 +1,170 @@
+url: https://adamrsophie.github.io/pgmcompR/
+
+template:
+  bootstrap: 5
+  light-switch: true
+  math-rendering: katex
+
+navbar:
+  structure:
+    left: [intro, reference, articles, news]
+    right: [search, lightswitch, github]
+
+home:
+  sidebar:
+    structure: [links, license, citation, authors, dev]
+
+articles:
+- title: Getting started
+  navbar: Getting started
+  contents:
+  - pgmcompR
+  - learning-discrete-networks
+- title: Inference
+  navbar: Inference
+  contents:
+  - exact-inference
+  - approximate-inference
+- title: Model families
+  navbar: Model families
+  contents:
+  - markov-networks
+  - gaussian-networks
+  - dynamic-networks
+- title: Causality
+  navbar: Causality
+  contents:
+  - causal-inference
+- title: Ecosystem and extension
+  navbar: Ecosystem and extension
+  contents:
+  - interoperability
+  - extending
+  - performance
+
+reference:
+- title: Package
+  contents:
+  - pgmcompR-package
+  - example_network
+- title: Graphs
+  desc: Directed, undirected and partially directed graphs and their algorithms.
+  contents:
+  - pgm_graph
+  - add_nodes
+  - nodes
+  - parents
+  - topological_sort
+  - moralize
+  - skeleton
+  - triangulate
+  - is_chordal
+  - d_separated
+  - v_structures
+  - compare_graphs
+  - is_isomorphic
+  - adjacency_matrix
+  - graph_from_adjacency
+  - as_pgm_graph
+- title: Factors
+  desc: Discrete factors and their algebra, in linear or log space.
+  contents:
+  - discrete_factor
+  - scalar_factor
+  - factor_scope
+  - factor_product
+  - factor-arithmetic
+  - factor_marginalize
+  - factor_reduce
+  - factor_reorder
+  - factor_reorder_states
+  - factor_normalize
+  - factor_divide
+  - factor_to_log
+  - factor_value
+  - factor_entropy
+- title: Conditional distributions
+  contents:
+  - cpd
+  - noisy_or_cpd
+  - cpd_variable
+  - lg_cpd
+  - lg_cpd_factor
+  - cpd_contract
+  - cpd_to_factor
+  - validate_cpd
+  - sample_cpd
+  - cpd_log_density
+- title: Bayesian networks
+  contents:
+  - bayesian_network
+  - add_cpd
+  - variable_registry
+  - check_model
+  - model_factors
+  - is_discrete_bn
+  - simulate_bn
+  - predict_bn
+  - log_likelihood
+- title: Markov networks and factor graphs
+  contents:
+  - markov_network
+  - add_factor
+  - factor_graph
+  - as_markov_network
+  - partition_function
+- title: Exact inference
+  contents:
+  - query
+  - elimination_order
+  - evidence_probability
+  - map_query
+  - junction_tree
+  - belief_propagation
+- title: Approximate inference
+  contents:
+  - approximate_inference
+- title: Gaussian and hybrid models
+  contents:
+  - gaussian_factor
+  - gaussian_joint
+  - gaussian_query
+  - gaussian_markov_network
+- title: Dynamic models
+  contents:
+  - dynamic_bn
+  - hmm
+  - filter_dbn
+  - particle_filter
+  - simulate_dbn
+  - kalman_filter
+- title: Learning
+  contents:
+  - fit_parameters
+  - ci_test
+  - pc_algorithm
+  - hill_climb
+  - network_score
+  - learn_structure
+  - bootstrap_structure
+- title: Causal inference
+  contents:
+  - intervene
+  - is_backdoor_set
+  - identify_effect
+  - scm
+- title: Input, output and interoperability
+  contents:
+  - write_bif
+  - from_bnlearn
+  - as_grain
+  - as_igraph
+- title: Visualization
+  contents:
+  - plot.pgm_graph
+  - plot.pgm_factor
+- title: Extension and backends
+  contents:
+  - register_inference_method
+  - pgm_backend
+  - with_backend

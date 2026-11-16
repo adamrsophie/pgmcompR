@@ -1,0 +1,108 @@
+---
+title: "Approximate inference"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Approximate inference}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4.5)
+```
+
+```{r}
+library(pgmcompR)
+```
+
+Exact inference is exponential in the treewidth of the model. When that is
+too large, approximate methods trade exactness for speed. Every approximate
+result in pgmcompR carries class `pgm_approximate` and a diagnostics
+attribute, so it cannot be mistaken for an exact answer.
+
+```{r}
+sp <- example_network("sprinkler")
+exact <- query(sp, "Rain", list(WetGrass = "T"))
+exact
+```
+
+## Forward sampling and rejection
+
+```{r}
+r <- query(sp, "Rain", list(WetGrass = "T"), method = "rejection", n = 20000, seed = 1)
+r
+attr(r, "diagnostics")$acceptance_rate
+```
+
+Rejection sampling discards every sample that disagrees with the evidence,
+so it becomes useless when the evidence is unlikely.
+
+## Likelihood weighting and importance sampling
+
+Likelihood weighting clamps the evidence and weights each sample by the
+likelihood of the evidence. The effective sample size (ESS) shows how much
+the weights degrade the sample.
+
+```{r}
+lw <- query(sp, "Rain", list(WetGrass = "T"), method = "likelihood_weighting", n = 20000, seed = 1)
+lw
+```
+
+General importance sampling draws from a proposal network with the same
+graph and states:
+
+```{r}
+proposal <- add_cpd(sp, cpd("Rain", c(0.2, 0.8, 0.2, 0.8), "Cloudy", list(Rain = c("F", "T"), Cloudy = c("F", "T"))))
+query(sp, "Rain", list(WetGrass = "T"), method = "importance", proposal = proposal, n = 20000, seed = 1)
+```
+
+## Gibbs sampling
+
+Gibbs sampling resamples each unobserved variable from its full conditional
+given its Markov blanket. Several chains are run; the split R-hat, bulk ESS
+and Monte Carlo standard error (MCSE) follow Vehtari et al. (2021).
+
+```{r}
+gb <- query(sp, "Rain", list(WetGrass = "T"), method = "gibbs", n = 3000,
+            chains = 4, burn_in = 500, seed = 2)
+gb
+d <- attr(gb, "diagnostics")
+d$rhat
+d$ess
+```
+
+Deterministic CPDs (zeros) can make a Gibbs chain reducible. R-hat well
+above 1.01 signals that the chains have not mixed; a warning of class
+`pgm_convergence_warning` is raised.
+
+## Loopy belief propagation
+
+On a tree shaped factor graph, belief propagation is exact. On a graph with
+cycles it is an approximation that may oscillate; damping helps.
+
+```{r}
+cancer <- example_network("cancer")
+belief_propagation(cancer, list(Xray = "positive"))$exact
+loopy <- loopy_bp(sp, list(WetGrass = "T"), damping = 0.5)
+loopy
+```
+
+`belief_propagation()` refuses to run on a loopy graph unless
+`allow_loops = TRUE`, so an approximate result is always explicitly
+requested.
+
+## Comparing methods
+
+```{r}
+methods <- c("rejection", "likelihood_weighting", "gibbs", "loopy_bp")
+est <- vapply(methods, function(m) {
+  q <- suppressWarnings(query(sp, "Rain", list(WetGrass = "T"), method = m, n = 5000, seed = 3))
+  factor_values(q)[2]
+}, numeric(1))
+round(c(exact = factor_values(exact)[2], est), 4)
+```
+
+## Reproducibility
+
+The `seed` argument makes a call reproducible without changing the global
+random number stream of the session.

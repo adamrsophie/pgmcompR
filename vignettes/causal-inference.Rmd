@@ -1,0 +1,136 @@
+---
+title: "Causal inference with graphical models"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Causal inference with graphical models}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4.5)
+```
+
+```{r}
+library(pgmcompR)
+```
+
+A causal Bayesian network reads its arcs as direct causal effects. Under
+that reading, the intervention $do(X = x)$ replaces the CPD of $X$ by a
+point mass and leaves every other mechanism intact (the truncated
+factorization). Conditioning and intervening then differ whenever $X$ and
+the outcome share a common cause.
+
+## Observing versus doing
+
+Kidney stone size $Z$ influences both the choice of treatment $X$ and
+recovery $Y$:
+
+```{r}
+st <- list(Size = c("small", "large"), Treatment = c("A", "B"), Recovery = c("no", "yes"))
+kidney <- bayesian_network(list(c("Size", "Treatment"), c("Size", "Recovery"), c("Treatment", "Recovery")), states = st)
+kidney <- add_cpd(kidney, cpd("Size", c(small = 0.51, large = 0.49)))
+kidney <- add_cpd(kidney, cpd("Treatment", c(0.25, 0.75, 0.77, 0.23), "Size", st))
+kidney <- add_cpd(kidney, cpd("Recovery", c(0.07, 0.93, 0.13, 0.87, 0.27, 0.73, 0.31, 0.69),
+                              c("Treatment", "Size"), st))
+query(kidney, "Recovery", list(Treatment = "A"))
+query(kidney, "Recovery", list(Treatment = "B"))
+do_query(kidney, "Recovery", list(Treatment = "A"))
+do_query(kidney, "Recovery", list(Treatment = "B"))
+```
+
+Observationally, treatment B looks better (Simpson's paradox). Under
+intervention, treatment A is better in every stratum and overall.
+`intervene()` returns the mutilated network itself:
+
+```{r}
+parents(intervene(kidney, list(Treatment = "A")), "Treatment")
+```
+
+## Adjustment
+
+When only observational data are available, the back door criterion says
+which covariates to adjust for. A set $Z$ satisfies it relative to $(X, Y)$
+if no element of $Z$ descends from $X$ and $Z$ blocks every path from $X$ to
+$Y$ that starts with an arrow into $X$.
+
+```{r}
+is_backdoor_set(kidney, "Treatment", "Recovery", "Size")
+adjustment_sets(kidney, "Treatment", "Recovery")
+identify_effect(kidney, "Treatment", "Recovery")
+```
+
+The adjustment formula from observational quantities reproduces the
+interventional answer:
+
+```{r}
+pz <- factor_values(query(kidney, "Size"))
+py <- sapply(st$Size, function(z) factor_values(query(kidney, "Recovery", list(Treatment = "A", Size = z)))[2])
+sum(pz * py)
+```
+
+### M-bias
+
+Adjusting for more is not always better. In the M structure, $M$ is a
+collider; conditioning on it opens a path between $X$ and $Y$:
+
+```{r}
+m <- dag(list(c("A", "X"), c("A", "M"), c("B", "M"), c("B", "Y"), c("X", "Y")))
+is_backdoor_set(m, "X", "Y", character())
+is_backdoor_set(m, "X", "Y", "M")
+```
+
+## Latent confounding and the front door
+
+When the confounder is unobserved, the back door is closed to us, but a
+mediator that intercepts every causal path can still identify the effect:
+
+```{r}
+fd <- dag(list(c("U", "Smoking"), c("U", "Cancer"), c("Smoking", "Tar"), c("Tar", "Cancer")))
+identify_effect(fd, "Smoking", "Cancer", latent = "U")
+```
+
+Without such a mediator, the effect is not identifiable from these graphs
+by the back door or front door criteria, and pgmcompR says so instead of
+returning a number:
+
+```{r, error = TRUE}
+bow <- dag(list(c("U", "X"), c("U", "Y"), c("X", "Y")))
+identify_effect(bow, "X", "Y", latent = "U")
+```
+
+A complete identification algorithm (Shpitser and Pearl's ID) is planned
+for a later version.
+
+## Counterfactuals in structural causal models
+
+A structural causal model (SCM) makes every endogenous variable a
+deterministic function of its parents and of exogenous noise. Counterfactual
+queries follow three steps: abduction (update the noise given the evidence),
+action (apply the intervention) and prediction.
+
+```{r}
+model <- scm(
+  exogenous = list(U_x = c(low = 0.6, high = 0.4), U_y = c(robust = 0.7, frail = 0.3)),
+  parents = list(Treated = "U_x", Died = c("Treated", "U_y")),
+  states = list(Treated = c("no", "yes"), Died = c("no", "yes")),
+  equations = list(
+    Treated = function(U_x) if (U_x == "high") "yes" else "no",
+    Died = function(Treated, U_y) if (U_y == "frail" && Treated == "no") "yes" else "no"
+  )
+)
+model
+```
+
+A treated patient survived. Would they have died without treatment?
+
+```{r}
+counterfactual(model, "Died", evidence = list(Treated = "yes", Died = "no"),
+               interventions = list(Treated = "no"))
+```
+
+Survival under treatment says nothing about frailty here, so the
+counterfactual probability of death equals the prior frailty, 0.3. This is
+not the same as $P(\text{Died} \mid do(\text{Treated} = \text{no}))$ for a
+fresh patient only because, in this simple model, the evidence happens to be
+uninformative about $U_y$.

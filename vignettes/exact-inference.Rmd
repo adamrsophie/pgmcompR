@@ -1,0 +1,136 @@
+---
+title: "Exact inference: variable elimination and junction trees"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Exact inference: variable elimination and junction trees}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6, fig.height = 4.5)
+```
+
+```{r}
+library(pgmcompR)
+```
+
+Exact inference computes posteriors such as $P(Q \mid E = e)$ without
+approximation. pgmcompR offers three exact engines that must, and in the
+test suite do, agree to machine precision: brute force enumeration (small
+models only), variable elimination and the junction tree.
+
+## Factors
+
+Every discrete computation is expressed with factors: nonnegative tables
+over a set of variables. Values are stored with the first variable varying
+fastest.
+
+```{r}
+st <- list(A = c("a0", "a1"), B = c("b0", "b1", "b2"))
+f <- discrete_factor(c("A", "B"), st, 1:6)
+f
+g <- discrete_factor("B", st["B"], c(0.5, 0.3, 0.2))
+factor_product(f, g)
+factor_marginalize(f, "B")
+factor_reduce(f, list(B = "b1"))
+factor_maximize(f, "A", argmax = TRUE)
+```
+
+State labels are part of a factor's identity. Two factors that disagree on
+the states of a shared variable are never multiplied by position:
+
+```{r, error = TRUE}
+factor_product(g, discrete_factor("B", list(B = c("b2", "b1", "b0")), 1:3))
+```
+
+## Variable elimination
+
+To answer a query, variable elimination multiplies the factors that mention
+a variable, sums the variable out and repeats. The cost depends on the
+elimination order, which `elimination_order()` chooses greedily.
+
+```{r}
+asia <- example_network("asia")
+elimination_order(asia, "min_fill")
+elimination_order(asia, "min_degree", variables = c("asia", "tub", "smoke"))
+query(asia, "lung", list(xray = "yes", smoke = "yes"))
+query(asia, "lung", list(xray = "yes", smoke = "yes"), method = "enumeration")
+```
+
+Before elimination, barren nodes (unobserved leaves outside the query) are
+pruned, because their CPDs sum to one.
+
+### Log space
+
+Long chains of small probabilities underflow in double precision. With
+`log = TRUE` the computation is carried out with log sum exp:
+
+```{r}
+evidence_probability(asia, list(xray = "yes", dysp = "yes"))
+evidence_probability(asia, list(xray = "yes", dysp = "yes"), log = TRUE)
+query(asia, "tub", list(xray = "yes"), log = TRUE)
+```
+
+### Soft evidence
+
+Virtual (likelihood) evidence multiplies in a likelihood vector instead of
+fixing a state: here the X-ray reader is only 70% sure that the film is
+abnormal.
+
+```{r}
+query(asia, "lung", virtual_evidence = list(xray = c(no = 0.3, yes = 0.7)))
+```
+
+### Impossible evidence
+
+Evidence of probability zero is an error with its own class, so callers can
+catch it:
+
+```{r, error = TRUE}
+query(asia, "lung", list(tub = "yes", either = "no"))
+evidence_probability(asia, list(tub = "yes", either = "no"))
+```
+
+## MAP and MPE
+
+`mpe_query()` maximizes over all unobserved variables; `map_query()`
+maximizes the marginal of a subset, summing the rest out first. They answer
+different questions and can disagree.
+
+```{r}
+mpe_query(asia, list(dysp = "yes"))
+map_query(asia, c("tub", "lung", "bronc"), list(dysp = "yes"))
+```
+
+## Junction trees
+
+When many queries share the same evidence, the junction tree pays the cost
+once. Moralize, triangulate, connect the maximal cliques by a maximum weight
+spanning tree, then calibrate by message passing.
+
+```{r}
+jt <- junction_tree(asia)
+jt
+cal <- calibrate(jt, list(xray = "yes"))
+clique_beliefs(cal)[[1]]
+query(asia, c("tub", "lung"), list(xray = "yes"), method = "jt")
+```
+
+After calibration, neighboring cliques agree on their separator marginals,
+and any single variable marginal can be read from a clique that contains it.
+
+```{r, eval = requireNamespace("igraph", quietly = TRUE)}
+plot(jt)
+```
+
+## Graph utilities used by inference
+
+```{r}
+m <- moralize(asia)
+is_chordal(m)
+tri <- triangulate(m, heuristic = "min_fill")
+tri$cliques
+d_separated(asia, "tub", "smoke", "lung")
+active_trail_nodes(asia, "smoke", z = "dysp")
+```

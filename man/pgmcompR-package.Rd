@@ -13,6 +13,7 @@ A unified framework for probabilistic graphical models written in R. Provides fi
 \seealso{
 Useful links:
 \itemize{
+  \item \url{https://adamrsophie.github.io/pgmcompR/}
   \item \url{https://github.com/adamrsophie/pgmcompR}
   \item Report bugs at \url{https://github.com/adamrsophie/pgmcompR/issues}
 }

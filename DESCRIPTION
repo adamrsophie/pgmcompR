@@ -50,6 +50,6 @@ Suggests:
     xml2
 VignetteBuilder: knitr
 Config/testthat/edition: 3
-URL: https://github.com/adamrsophie/pgmcompR
+URL: https://adamrsophie.github.io/pgmcompR/, https://github.com/adamrsophie/pgmcompR
 BugReports: https://github.com/adamrsophie/pgmcompR/issues
 Config/roxygen2/version: 8.1.1
